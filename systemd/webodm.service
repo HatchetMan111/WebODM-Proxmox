@@ -1,0 +1,26 @@
+[Unit]
+Description=WebODM - lokale Drohnen-Fotogrammetrie (Web-UI :@APP_PORT@)
+Documentation=https://github.com/WebODM/WebODM
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=webodm
+Group=webodm
+WorkingDirectory=@APP_DIR@
+Environment=HOME=/home/webodm
+Environment=PYTHONUNBUFFERED=1
+Environment=WO_PORT=@APP_PORT@
+ExecStart=@APP_DIR@/webodm.sh start --port @APP_PORT@ --media-dir @DATA_DIR@/media --db-dir @DATA_DIR@/db --node-dir @DATA_DIR@/node --default-nodes 1
+ExecStop=-@APP_DIR@/webodm.sh stop
+Restart=always
+RestartSec=15
+TimeoutStartSec=0
+TimeoutStopSec=180
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
