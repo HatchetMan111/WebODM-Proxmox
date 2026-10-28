@@ -281,8 +281,12 @@ WebODM-Proxmox/
 
 - Das Script ist idempotent ausgelegt: erneutes Ausführen mit `--vmid`
   aktualisiert die Installation.
-- Die VM nutzt DHCP. Für eine feste IP kann `--ip` beim Update genutzt werden;
-  die Cloud-Init-Konfiguration bleibt beim Update unverändert.
+- Die VM nutzt DHCP. `--ip` überschreibt nur die IP, die der Installer für
+  SSH/Verify verwendet (z. B. wenn ARP/Guest-Agent scheitert); es konfiguriert
+  keine statische IP in der VM.
+- Das Ubuntu-Cloud-Image bringt den QEMU Guest Agent oft nicht mit. Der
+  Host-Installer wartet deshalb nur kurz und nutzt danach ARP/Neighbor; der
+  Agent wird im Inner-Installer nachinstalliert.
 - Getestet wurde die statische Struktur in einer Sandbox. Der vollständige
   VM-/Reboot-Test muss auf einem echten Proxmox-Host laufen
   (`tests/reboot-test.sh`).
