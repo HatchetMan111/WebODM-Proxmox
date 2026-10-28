@@ -398,7 +398,7 @@ sweep_bridge() {
 
 IP="$IP_OVERRIDE"
 SSH_READY=0
-for i in $(seq 1 120); do
+for i in $(seq 1 60); do
   if [[ -z "$IP_OVERRIDE" ]]; then
     if (( i == 1 || i % 12 == 0 )); then sweep_bridge; fi
     NEW_IP="$(detect_ip 2>/dev/null || true)"
@@ -409,7 +409,7 @@ for i in $(seq 1 120); do
     break
   fi
   if (( i % 6 == 0 )); then
-    msg_info "  ... warte auf SSH (${i}/120, IP: ${IP:-?})"
+    msg_info "  ... warte auf SSH (${i}/60, IP: ${IP:-?})"
   fi
   sleep 5
 done
@@ -419,6 +419,10 @@ if [[ "$SSH_READY" != "1" ]]; then
   echo "  IP: ${IP:-unbekannt}"
   echo "  Konsole: qm terminal ${VMID}"
   echo "  Gast-Agent: qm agent ${VMID} ping"
+  echo "  Bridge ${BRIDGE}:"
+  ip -br a show dev "$BRIDGE" 2>/dev/null | sed 's/^/    /' || true
+  echo "  Nachbarn auf ${BRIDGE}:"
+  ip neigh show dev "$BRIDGE" 2>/dev/null | head -n 10 | sed 's/^/    /' || true
   echo "  Ggf. --ip <VM-IP> setzen."
   exit 1
 fi
