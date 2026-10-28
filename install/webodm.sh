@@ -30,6 +30,7 @@ WO_REF="master"
 OS_VERSION="24.04"
 CI_USER="ubuntu"
 IP_OVERRIDE=""
+NAMESERVER=""
 SSH_KEY_PATH="/root/.ssh/webodm_vm_ed25519"
 FORCE=0
 DEBUG=0
@@ -78,6 +79,7 @@ Optionen:
   --ref REF             WebODM-Branch/Tag (Default: ${WO_REF})
   --os 24.04|22.04      Ubuntu-Cloud-Image (Default: ${OS_VERSION})
   --ip IP               IP fuer Update/SSH erzwingen (sonst Guest-Agent/ARP)
+  --nameserver DNS      DNS-Server fuer Cloud-Init (Default: DHCP)
   --ssh-key PATH        Privater SSH-Key (Default: ${SSH_KEY_PATH})
   --force               Update-Modus auch ohne WebODM-Erkennung erzwingen
   --debug               bash -x + erweiterte Diagnose
@@ -101,6 +103,7 @@ while [[ $# -gt 0 ]]; do
     --ref) WO_REF="$2"; shift 2;;
     --os) OS_VERSION="$2"; shift 2;;
     --ip) IP_OVERRIDE="$2"; shift 2;;
+    --nameserver) NAMESERVER="$2"; shift 2;;
     --ssh-key) SSH_KEY_PATH="$2"; shift 2;;
     --force) FORCE=1; shift;;
     --debug) DEBUG=1; shift;;
@@ -126,6 +129,9 @@ is_uint "$APP_PORT" && (( APP_PORT >= 1 && APP_PORT <= 65535 )) || die "--port m
 [[ "$WO_REF" =~ ^[A-Za-z0-9._/-]+$ ]] || die "--ref enthaelt ungueltige Zeichen."
 if [[ -n "$VMID" ]]; then
   is_uint "$VMID" && (( VMID >= 100 )) || die "--vmid muss eine Zahl >= 100 sein."
+fi
+if [[ -n "$IP_OVERRIDE" ]]; then
+  [[ "$IP_OVERRIDE" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || die "--ip muss eine IPv4-Adresse sein."
 fi
 (( RAM_MB >= 6144 )) || msg_warn "Weniger als 6 GB RAM: WebODM kann bei echten Datensaetzen OOM gehen."
 
@@ -318,7 +324,9 @@ if [[ "$VM_EXISTS" == "0" ]]; then
   qm set "$VMID" --ciuser "$CI_USER"
   qm set "$VMID" --sshkeys "$SSH_KEYS_TMP"
   qm set "$VMID" --ipconfig0 "ip=dhcp"
-  qm set "$VMID" --nameserver "1.1.1.1 9.9.9.9"
+  if [[ -n "$NAMESERVER" ]]; then
+    qm set "$VMID" --nameserver "$NAMESERVER"
+  fi
   qm set "$VMID" --ciupgrade 0
   rm -f "$SSH_KEYS_TMP"; SSH_KEYS_TMP=""
 
@@ -339,16 +347,20 @@ fi
 # Das Ubuntu-Cloud-Image bringt den Guest Agent oft nicht mit. Deshalb nur
 # kurz warten und danach sofort per ARP/Neighbor/DHCP weitermachen. Der Agent
 # wird spaeter im Inner-Installer nachinstalliert.
-msg_info "Pruefe QEMU Guest Agent (kurz) ..."
 AGENT_OK=0
-for _ in $(seq 1 5); do
-  if timeout 2 qm agent "$VMID" ping >/dev/null 2>&1; then AGENT_OK=1; break; fi
-  sleep 1
-done
-if [[ "$AGENT_OK" == "1" ]]; then
-  msg_ok "Guest Agent antwortet."
+if [[ -n "$IP_OVERRIDE" ]]; then
+  msg_info "Guest-Agent-Suche uebersprungen (--ip gesetzt)."
 else
-  msg_warn "Guest Agent (noch) nicht verfuegbar – nutze ARP/Neighbor-Fallback."
+  msg_info "Pruefe QEMU Guest Agent (max. ca. 10s) ..."
+  for _ in $(seq 1 5); do
+    if timeout 2 qm agent "$VMID" ping >/dev/null 2>&1; then AGENT_OK=1; break; fi
+    sleep 1
+  done
+  if [[ "$AGENT_OK" == "1" ]]; then
+    msg_ok "Guest Agent antwortet."
+  else
+    msg_info "Guest Agent fehlt (bei Cloud-Images normal) – suche VM-IP per ARP/Neighbor."
+  fi
 fi
 
 detect_ip() {
@@ -390,26 +402,40 @@ sys.exit(1)
 
 sweep_bridge() {
   local subnet i
-  subnet="$(ip -4 -o addr show dev "$BRIDGE" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | cut -d. -f1-3 || true)"
+  subnet="$(ip -4 -o addr show dev "$BRIDGE" 2>/dev/null | awk 'NR==1 {print $4}' | cut -d/ -f1 | cut -d. -f1-3 || true)"
   [[ "$subnet" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 0
   for i in $(seq 1 254); do ping -c1 -W1 "${subnet}.${i}" >/dev/null 2>&1 & done
   wait 2>/dev/null || true
 }
 
 IP="$IP_OVERRIDE"
+if [[ -n "$IP_OVERRIDE" ]]; then
+  msg_info "Nutze vorgegebene VM-IP: ${IP}"
+else
+  if ! ip -4 -o addr show dev "$BRIDGE" 2>/dev/null | grep -q ' inet '; then
+    msg_warn "Bridge ${BRIDGE} hat keine IPv4-Adresse – automatische IP-Suche ist eingeschraenkt."
+  else
+    msg_info "Suche VM-IP per ARP/Neighbor auf ${BRIDGE} (kann bis zu 1 Min dauern) ..."
+    sweep_bridge
+  fi
+fi
+
 SSH_READY=0
 for i in $(seq 1 60); do
   if [[ -z "$IP_OVERRIDE" ]]; then
-    if (( i == 1 || i % 12 == 0 )); then sweep_bridge; fi
+    if (( i > 1 && i % 12 == 0 )); then sweep_bridge; fi
     NEW_IP="$(detect_ip 2>/dev/null || true)"
-    [[ -n "$NEW_IP" ]] && IP="$NEW_IP"
+    if [[ -n "$NEW_IP" && "$NEW_IP" != "$IP" ]]; then
+      msg_ok "VM-IP erkannt: ${NEW_IP}"
+      IP="$NEW_IP"
+    fi
   fi
   if [[ -n "$IP" ]] && ssh "${SSH_OPTS[@]}" "${CI_USER}@${IP}" true >/dev/null 2>&1; then
     SSH_READY=1
     break
   fi
   if (( i % 6 == 0 )); then
-    msg_info "  ... warte auf SSH (${i}/60, IP: ${IP:-?})"
+    msg_info "  ... warte auf SSH (${i}/60, IP: ${IP:-noch nicht gefunden})"
   fi
   sleep 5
 done

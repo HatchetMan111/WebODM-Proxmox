@@ -73,7 +73,8 @@ sudo bash install/webodm.sh
 --port N              Web-UI-Port (Default: 8000)
 --ref REF             WebODM-Branch/Tag (Default: master)
 --os 24.04|22.04      Ubuntu-Version (Default: 24.04)
---ip IP               IP für Update/SSH erzwingen
+--ip IP               IP für Update/SSH erzwingen (überspringt Guest-Agent/ARP)
+--nameserver DNS      DNS-Server für Cloud-Init (Default: DHCP)
 --ssh-key PATH        Privater SSH-Key (Default: /root/.ssh/webodm_vm_ed25519)
 --force               Update-Modus ohne WebODM-Erkennung erzwingen
 --debug               bash -x + erweiterte Diagnose
@@ -111,7 +112,8 @@ bash install/webodm.sh --vmid 210 --cores 8 --ram 32768 --disk 500
 ```
 
 Der `worker` läuft mit erhöhtem `oom_score_adj`, damit bei Speicherdruck eher
-der Worker als Datenbank/Web-UI beendet wird. Trotzdem gilt: zu wenig RAM
+der Worker als Datenbank/Web-UI beendet wird. Bei weniger als 8 GB RAM legt
+der Installer automatisch eine 4-GiB-Swap-Datei an. Trotzdem gilt: zu wenig RAM
 führt zu OOM und fehlgeschlagenen Tasks.
 
 ### Update
@@ -187,7 +189,9 @@ qm agent 210 ping
 qm config 210
 ```
 
-Cloud-Init braucht 30–60 Sekunden. Bei DHCP-Problemen im Gast:
+Cloud-Init braucht 30–60 Sekunden. Die Meldung „Guest Agent fehlt“ ist bei
+Cloud-Images normal; danach sucht der Installer automatisch per ARP/Neighbor
+weiter. Bitte in dieser Phase nicht abbrechen. Bei DHCP-Problemen im Gast:
 
 ```bash
 qm terminal 210

@@ -158,6 +158,22 @@ apt-get install -y --no-install-recommends \
 systemctl enable --now qemu-guest-agent >/dev/null 2>&1 || msg_warn "qemu-guest-agent konnte nicht gestartet werden (nicht kritisch)."
 msg_ok "Systempakete installiert."
 
+# Test-VMs mit wenig RAM bekommen Swap, damit WebODM beim Erststart nicht OOM geht.
+MEM_MB="$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)"
+if (( MEM_MB < 8192 )) && ! swapon --show 2>/dev/null | grep -q .; then
+  msg_info "Wenig RAM (${MEM_MB} MiB) – lege 4 GiB Swap an ..."
+  if fallocate -l 4G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=4096 status=none 2>/dev/null; then
+    chmod 600 /swapfile
+    mkswap /swapfile >/dev/null
+    swapon /swapfile
+    grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    msg_ok "4 GiB Swap aktiv."
+  else
+    rm -f /swapfile
+    msg_warn "Swap konnte nicht angelegt werden – fahre ohne Swap fort."
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 # 2. Docker CE + Compose-Plugin (offizielles Docker-Repo)
 # ---------------------------------------------------------------------------
