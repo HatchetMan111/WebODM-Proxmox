@@ -336,16 +336,19 @@ fi
 # ---------------------------------------------------------------------------
 # Gast-Agent / IP
 # ---------------------------------------------------------------------------
-msg_info "Warte auf den QEMU Guest Agent ..."
+# Das Ubuntu-Cloud-Image bringt den Guest Agent oft nicht mit. Deshalb nur
+# kurz warten und danach sofort per ARP/Neighbor/DHCP weitermachen. Der Agent
+# wird spaeter im Inner-Installer nachinstalliert.
+msg_info "Pruefe QEMU Guest Agent (kurz) ..."
 AGENT_OK=0
-for _ in $(seq 1 60); do
-  if timeout 10 qm agent "$VMID" ping >/dev/null 2>&1; then AGENT_OK=1; break; fi
-  sleep 3
+for _ in $(seq 1 5); do
+  if timeout 2 qm agent "$VMID" ping >/dev/null 2>&1; then AGENT_OK=1; break; fi
+  sleep 1
 done
 if [[ "$AGENT_OK" == "1" ]]; then
   msg_ok "Guest Agent antwortet."
 else
-  msg_warn "Guest Agent antwortet noch nicht – nutze ARP/Neighbor-Fallback."
+  msg_warn "Guest Agent (noch) nicht verfuegbar – nutze ARP/Neighbor-Fallback."
 fi
 
 detect_ip() {
